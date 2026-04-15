@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Globe Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #040404; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    #canvas-container { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+    #canvas-container canvas { max-width: 100vh; max-height: 100vh; aspect-ratio: 1; }
+    #controls {
+      position: fixed; top: 20px; right: 20px; z-index: 10;
+      background: rgba(255,255,255,0.08); backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 12px;
+      padding: 20px; min-width: 220px; color: #fff;
+    }
+    #controls h3 { font-size: 14px; font-weight: 600; margin-bottom: 16px; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; }
+    .control-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .control-row label { font-size: 13px; opacity: 0.8; }
+    .toggle { position: relative; width: 40px; height: 22px; cursor: pointer; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute; inset: 0; background: rgba(255,255,255,0.15);
+      border-radius: 11px; transition: background 0.2s;
+    }
+    .toggle .slider::before {
+      content: ''; position: absolute; width: 16px; height: 16px;
+      left: 3px; bottom: 3px; background: #fff; border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .slider { background: #6b84b5; }
+    .toggle input:checked + .slider::before { transform: translateX(18px); }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div id="controls">
+    <h3>Globe Controls</h3>
+    <div class="control-row">
+      <label>Rotation</label>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-rotation" checked />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="control-row">
+      <label>Coastline Strokes</label>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-strokes" checked />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="control-row">
+      <label>Orbiting Lines</label>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-orbiting" checked />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="control-row">
+      <label>Particles</label>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-particles" checked />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="control-row">
+      <label>Vignette</label>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-vignette" checked />
+        <span class="slider"></span>
+      </label>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "gsap": "https://cdn.jsdelivr.net/npm/gsap@3.12.5/+esm"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three'
+    import gsap from 'gsap'
+
+    // ============================================================
+    // Time
+    // ============================================================
+    class TimeUtils {
+      constructor() { this._delta = 0; this._time = 0; this.clock = new THREE.Clock(true) }
+      update() {
+        this._delta = Math.min(this.clock.getDelta(), 0.1)
+        this._time = this.clock.elapsedTime
+      }
+      get delta() { return this._delta }
+      get elapsedTime() { return this._time }
+    }
+    const Time = new TimeUtils()
+
+    // ============================================================
+    // GLSL helpers
+    // ============================================================
+    const mapLinearGLSL = /* glsl */`
+      float mapLinear(float value, float in_min, float in_max, float out_min, float out_max) {
+        return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+      }
+    `
+    const circleGLSL = /* glsl */`
+      float circle(vec2 uv, vec2 pos, float rad) {
+        float d = length(pos - uv) - rad;
+        return step(d, 0.0);
+      }
+    `
+    const computeGradientMaskGLSL = /* glsl */`
+      float computeGradientMask(float animation, float len, vec2 startEnd, float uvX) {
+        float t = mapLinear(animation, 0.0, 1.0, -len, 1.0 + len);
+        float tStart = clamp(t - len, 0.0, 1.0);
+        float tEnd = clamp(t + len, 0.0, 1.0);
+        float x = mapLinear(uvX, tStart, animation, 0.0, 1.0);
+        float y = mapLinear(uvX, animation, tEnd, 1.0, 0.0);
+        float visibleBand = clamp(x * y, 0.0, 1.0);
+        float start = mapLinear(uvX, startEnd.x, startEnd.y, 0.0, 1.0);
+        float end = mapLinear(uvX, 1.0 - startEnd.x, 1.0 - startEnd.y, 0.0, 1.0);
+        return visibleBand * start * end;
+      }
+    `
+
+    // ============================================================
+    // Land shader
+    // ============================================================
+    const landShader = {
+      uniforms: {
+        worldMap: { value: null },
+        backgroundColor: { value: new THREE.Color(0x040404) },
+        landColor: { value: new THREE.Color(0x1d2332) },
+        seaColor: { value: new THREE.Color(0x141a26) },
+        rimColor: { value: new THREE.Color(0x2a3650) },
+        lightColor: { value: new THREE.Color(0x6b84b5) },
+        remapRange: { value: new THREE.Vector2(0, 0.5) },
+        powStrength: { value: 0.1 },
+        cameraPosition: { value: new THREE.Vector3() },
+        opacity: { value: 0 },
+        lightBrightness: { value: 10.0 },
+        lightTransition: { value: 0.0 },
+      },
+      vertexShader: /* glsl */`
+        varying vec2 vUv;
+        varying vec3 vNormal;
+        varying vec3 vViewDirection;
+        void main() {
+          vUv = uv;
+          vNormal = normalize(mat3(modelMatrix) * normal);
+          vec3 worldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+          vViewDirection = normalize(cameraPosition - worldPos);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform vec3 lightColor;
+        uniform float lightBrightness;
+        uniform float lightTransition;
+        uniform vec3 backgroundColor;
+        uniform vec3 landColor;
+        uniform vec3 seaColor;
+        uniform vec3 rimColor;
+        uniform vec2 remapRange;
+        uniform float powStrength;
+        uniform float opacity;
+        uniform sampler2D worldMap;
+        varying vec3 vNormal;
+        varying vec3 vViewDirection;
+        varying vec2 vUv;
+        void main() {
+          vec4 world = texture2D(worldMap, vUv);
+          float fresnelFactor = abs(dot(vViewDirection, normalize(vNormal)));
+          fresnelFactor = smoothstep(remapRange.x, remapRange.y, fresnelFactor);
+          fresnelFactor = pow(fresnelFactor, powStrength);
+          vec3 landColor2 = mix(landColor, lightColor * mix(0.0, lightBrightness, lightTransition), world.g);
+          vec3 outgoingColor = mix(seaColor, landColor2, world.a);
+          outgoingColor = mix(outgoingColor, rimColor, 1.0 - fresnelFactor);
+          gl_FragColor = vec4(mix(backgroundColor, outgoingColor, opacity), 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }
+      `,
+    }
+
+    // ============================================================
+    // Land
+    // ============================================================
+    class Land extends THREE.Group {
+      constructor(geometry) {
+        super()
+        this.mesh = new THREE.Mesh(geometry, new THREE.ShaderMaterial({
+          fragmentShader: landShader.fragmentShader,
+          uniforms: JSON.parse(JSON.stringify(landShader.uniforms)),
+          vertexShader: landShader.vertexShader,
+        }))
+        // Deep-clone uniform values
+        const u = this.mesh.material.uniforms
+        u.worldMap = { value: null }
+        u.backgroundColor = { value: new THREE.Color(0x040404) }
+        u.landColor = { value: new THREE.Color(0x1d2332) }
+        u.seaColor = { value: new THREE.Color(0x141a26) }
+        u.rimColor = { value: new THREE.Color(0x2a3650) }
+        u.lightColor = { value: new THREE.Color(0x6b84b5) }
+        u.remapRange = { value: new THREE.Vector2(0, 0.5) }
+        u.powStrength = { value: 0 }
+        u.cameraPosition = { value: new THREE.Vector3() }
+        u.opacity = { value: 0 }
+        u.lightBrightness = { value: 10.0 }
+        u.lightTransition = { value: 0.0 }
+
+        this.add(this.mesh)
+        this.scale.setScalar(0.75)
+        this.rotation.y = Math.PI
+      }
+      setTexture(texture, anisotropy = 1) {
+        texture.colorSpace = THREE.SRGBColorSpace
+        texture.anisotropy = anisotropy
+        this.mesh.material.uniforms.worldMap.value = texture
+      }
+      play(delay = 0) {
+        gsap.to(this.mesh.material.uniforms.powStrength, { delay, duration: 6, value: 0.1 })
+        gsap.to(this.mesh.material.uniforms.opacity, { delay, duration: 3, value: 1 })
+        gsap.to(this.mesh.material.uniforms.lightTransition, { delay: 3, duration: 20, ease: 'linear', value: 1 })
+      }
+      stop() {
+        gsap.killTweensOf(this.mesh.material.uniforms.powStrength)
+        this.mesh.material.uniforms.powStrength.value = 0
+        gsap.killTweensOf(this.mesh.material.uniforms.opacity)
+        this.mesh.material.uniforms.opacity.value = 0
+        gsap.killTweensOf(this.mesh.material.uniforms.lightTransition)
+        this.mesh.material.uniforms.lightTransition.value = 0
+      }
+      update(camera) { this.mesh.material.uniforms.cameraPosition.value.copy(camera.position) }
+    }
+
+    // ============================================================
+    // Vignette shader
+    // ============================================================
+    const vignetteShaderDef = {
+      uniforms: {
+        cameraPosition: { value: new THREE.Vector3() },
+        color: { value: new THREE.Color(0x7d92b9) },
+        opacity: { value: 0 },
+        powStrength: { value: 100 },
+        remapRange: { value: new THREE.Vector2(0, 1) },
+      },
+      vertexShader: /* glsl */`
+        varying vec3 vNormal; varying vec3 vViewDirection;
+        void main() {
+          vNormal = normalize(mat3(modelMatrix) * normal);
+          vec3 worldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+          vViewDirection = normalize(cameraPosition - worldPos);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform vec3 color; uniform vec2 remapRange; uniform float powStrength; uniform float opacity;
+        varying vec3 vNormal; varying vec3 vViewDirection;
+        void main() {
+          float f = abs(dot(vViewDirection, normalize(vNormal)));
+          f = smoothstep(remapRange.x, remapRange.y, f);
+          f = pow(f, powStrength);
+          gl_FragColor = vec4(color, clamp(f, 0.0, 1.0) * opacity);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }
+      `,
+    }
+
+    function cloneUniforms(u) {
+      const out = {}
+      for (const k in u) {
+        const v = u[k].value
+        if (v && v.clone) out[k] = { value: v.clone() }
+        else out[k] = { value: v }
+      }
+      return out
+    }
+
+    // ============================================================
+    // Vignette
+    // ============================================================
+    class Vignette extends THREE.Group {
+      constructor(geometry) {
+        super()
+        this.outerMesh = new THREE.Mesh(geometry, new THREE.ShaderMaterial({
+          uniforms: cloneUniforms(vignetteShaderDef.uniforms),
+          vertexShader: vignetteShaderDef.vertexShader,
+          fragmentShader: vignetteShaderDef.fragmentShader,
+          side: THREE.BackSide, transparent: true,
+        }))
+        this.outerMesh.scale.setScalar(2)
+        this.add(this.outerMesh)
+
+        const innerUniforms = cloneUniforms(vignetteShaderDef.uniforms)
+        this.innerMesh = new THREE.Mesh(geometry, new THREE.ShaderMaterial({
+          uniforms: innerUniforms,
+          vertexShader: vignetteShaderDef.vertexShader,
+          fragmentShader: /* glsl */`
+            uniform vec3 color; uniform vec2 remapRange; uniform float powStrength; uniform float opacity;
+            varying vec3 vNormal; varying vec3 vViewDirection;
+            void main() {
+              float f = 1.0 - abs(dot(vViewDirection, normalize(vNormal)));
+              f = smoothstep(remapRange.x, remapRange.y, f);
+              f = pow(f, powStrength);
+              gl_FragColor = vec4(color, clamp(f, 0.0, 1.0) * opacity);
+              #include <tonemapping_fragment>
+              #include <colorspace_fragment>
+            }
+          `,
+          side: THREE.FrontSide, transparent: true, depthWrite: false,
+        }))
+        this.innerMesh.scale.setScalar(0.76)
+        this.add(this.innerMesh)
+        this.stop()
+      }
+      update(camera) {
+        this.outerMesh.material.uniforms.cameraPosition.value.copy(camera.position)
+        this.innerMesh.material.uniforms.cameraPosition.value.copy(camera.position)
+      }
+      play(delay = 0) {
+        this.stop()
+        gsap.to(this.outerMesh.material.uniforms.opacity, { value: 1, duration: 3, delay })
+        gsap.to(this.outerMesh.material.uniforms.powStrength, { value: 100, duration: 3, delay })
+        gsap.to(this.innerMesh.material.uniforms.opacity, { value: 0.6, duration: 3, delay })
+        gsap.to(this.innerMesh.material.uniforms.powStrength, { value: 3, duration: 3, delay })
+      }
+      stop() {
+        ;[this.outerMesh, this.innerMesh].forEach(m => {
+          gsap.killTweensOf(m.material.uniforms.opacity)
+          gsap.killTweensOf(m.material.uniforms.powStrength)
+        })
+        this.outerMesh.material.uniforms.opacity.value = 0
+        this.outerMesh.material.uniforms.powStrength.value = 200
+        this.innerMesh.material.uniforms.opacity.value = 0
+        this.innerMesh.material.uniforms.powStrength.value = 10
+      }
+    }
+
+    // ============================================================
+    // GlobeLineMaterial
+    // ============================================================
+    class GlobeLineMaterial extends THREE.ShaderMaterial {
+      constructor() {
+        super({
+          depthWrite: false, transparent: true,
+          uniforms: {
+            glowAnimationProgress: { value: 0.0 },
+            gradientBrightness: { value: 4.0 },
+            gradientLength: { value: 0.25 },
+            gradientStartEnd: { value: [0.0, 0.1] },
+            lineColor: { value: new THREE.Color(0x8aa4d4) },
+            revealAnimationProgress: { value: 0.0 },
+          },
+          vertexShader: /* glsl */`
+            attribute float animationPercentage;
+            varying float vAnimationPercentage;
+            void main() {
+              vAnimationPercentage = animationPercentage;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */`
+            uniform vec3 lineColor;
+            uniform float glowAnimationProgress;
+            uniform float revealAnimationProgress;
+            uniform float gradientLength;
+            uniform float gradientBrightness;
+            uniform vec2 gradientStartEnd;
+            varying float vAnimationPercentage;
+            ${mapLinearGLSL}
+            ${computeGradientMaskGLSL}
+            void main() {
+              float gradientPulseMask = computeGradientMask(glowAnimationProgress, gradientLength, gradientStartEnd, vAnimationPercentage);
+              float reveal = computeGradientMask(mix(0.0, 0.5, revealAnimationProgress), 1.0, vec2(0.0, 0.5), vAnimationPercentage);
+              gl_FragColor = vec4(mix(lineColor, lineColor * gradientBrightness, gradientPulseMask), reveal);
+            }
+          `,
+        })
+      }
+    }
+
+    // ============================================================
+    // GlobeAnimatedLines
+    // ============================================================
+    class GlobeAnimatedLines {
+      constructor(material, key) {
+        this.material = material; this.key = key
+        this.settings = { duration: 10, delay: 0, easing: 'linear', loop: true }
+        this.tween = null
+      }
+      play() {
+        this.stop()
+        this.tween = gsap.timeline({ repeat: this.settings.loop ? -1 : 0 })
+        this.tween.to([this.material.uniforms[this.key]], {
+          value: 1, duration: this.settings.duration, delay: this.settings.delay, ease: this.settings.easing,
+        })
+      }
+      stop() {
+        if (this.tween) { this.tween.kill(); this.tween = null }
+        this.material.uniforms[this.key].value = 0
+      }
+    }
+
+    // ============================================================
+    // OrbitingLines
+    // ============================================================
+    const CITIES = [
+      [40.71,-74.01],[51.51,-0.13],[48.86,2.35],[35.68,139.69],[22.32,114.17],
+      [1.35,103.82],[-33.87,151.21],[55.76,37.62],[19.43,-99.13],[-23.55,-46.63],
+      [37.57,126.98],[28.61,77.21],[25.2,55.27],[39.9,116.4],[-1.29,36.82],
+      [41.01,28.98],[13.76,100.5],[52.52,13.41],[34.05,-118.24],[43.65,-79.38],
+    ]
+    function latLonToSphere(lat, lon) {
+      const latR = lat * Math.PI / 180, lonR = lon * Math.PI / 180
+      return new THREE.Vector3(Math.cos(latR)*Math.cos(lonR), Math.cos(latR)*Math.sin(lonR), Math.sin(latR))
+    }
+    function randomCityPair() {
+      const a = Math.floor(Math.random()*CITIES.length)
+      let b = Math.floor(Math.random()*(CITIES.length-1)); if(b>=a) b++
+      return [latLonToSphere(CITIES[a][0],CITIES[a][1]), latLonToSphere(CITIES[b][0],CITIES[b][1])]
+    }
+    function createArcGeometry(from, to) {
+      const points = []
+      for(let i=0;i<=48;i++){
+        const t=i/48, p=new THREE.Vector3().copy(from).lerp(to,t).normalize()
+        p.multiplyScalar(0.76+0.12*Math.sin(Math.PI*t)); points.push(p)
+      }
+      return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points),48,0.0015,4,false)
+    }
+
+    class ArcLine {
+      constructor(group, color) {
+        this.group = group
+        this.material = new THREE.ShaderMaterial({
+          uniforms: { lineColor:{value:color}, progress:{value:0}, opacity:{value:0}, tailLength:{value:0.4} },
+          vertexShader: `varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+          fragmentShader: `
+            uniform vec3 lineColor; uniform float progress; uniform float opacity; uniform float tailLength; varying vec2 vUv;
+            void main(){
+              float t=vUv.x,head=progress,tail=max(0.0,head-tailLength);
+              if(t>head||t<tail)discard;
+              float dist=(t-tail)/tailLength;
+              float alpha=smoothstep(0.0,0.15,dist)*opacity;
+              float headGlow=smoothstep(0.6,1.0,dist)*0.8;
+              gl_FragColor=vec4(lineColor*(1.0+headGlow),alpha);
+            }
+          `,
+          transparent:true, depthWrite:false, side:THREE.DoubleSide,
+        })
+        const[from,to]=randomCityPair()
+        this.mesh=new THREE.Mesh(createArcGeometry(from,to),this.material)
+        group.add(this.mesh)
+      }
+      animate(){
+        const[from,to]=randomCityPair()
+        this.mesh.geometry.dispose()
+        this.mesh.geometry=createArcGeometry(from,to)
+        const u=this.material.uniforms; u.progress.value=0; u.opacity.value=0
+        this.timeline=gsap.timeline({delay:Math.random()*3,onComplete:()=>this.animate()})
+        this.timeline.to(u.opacity,{value:1,duration:0.3})
+        this.timeline.to(u.progress,{value:1.4,duration:2.5,ease:'power1.inOut'},'<')
+        this.timeline.to(u.opacity,{value:0,duration:0.3},'-=0.3')
+      }
+      stop(){
+        if(this.timeline){this.timeline.kill();this.timeline=null}
+        this.material.uniforms.opacity.value=0; this.material.uniforms.progress.value=0
+      }
+    }
+
+    class OrbitingLines {
+      constructor(group) {
+        this.arcs = []
+        const color = new THREE.Color(0xd9e5ff)
+        for(let i=0;i<10;i++) this.arcs.push(new ArcLine(group, color))
+      }
+      play() { this.arcs.forEach(a=>a.animate()) }
+      stop() { this.arcs.forEach(a=>a.stop()) }
+    }
+
+    // ============================================================
+    // Particles
+    // ============================================================
+    const particlesShader = {
+      uniforms: {
+        cameraPosition:{value:new THREE.Vector3()}, intensity:{value:70},
+        lineHeight:{value:0.01}, opacity:{value:0}, particleLifetime:{value:3.0},
+        particleScale:{value:0.1}, particleSpeed:{value:0.2}, pixelRatio:{value:1},
+        powStrength:{value:10}, remapRange:{value:new THREE.Vector2(0,0.1)},
+        time:{value:0}, worldMap:{value:null},
+      },
+      vertexShader: /* glsl */`
+        attribute vec3 color; attribute float size; attribute float reveal; attribute float phase;
+        uniform float time; uniform float lineHeight; uniform float particleLifetime;
+        uniform float particleSpeed; uniform float pixelRatio; uniform float particleScale;
+        varying float vTravelDistance; varying vec3 vNormal; varying vec3 vPosition;
+        varying vec3 vViewDirection; varying float vReveal; varying vec3 vColor;
+        ${mapLinearGLSL}
+        void main() {
+          vReveal=reveal; float particleTime=time+phase;
+          float lifecycleProgress=mod(particleTime/particleLifetime,1.0);
+          vec3 originPosition=position; float travelDistance=0.0;
+          if(lifecycleProgress<0.95){travelDistance=(lifecycleProgress/0.95)*lineHeight*particleSpeed;}
+          vec3 lineDirection=normalize(position);
+          vec3 basePosition=originPosition+(lineDirection*travelDistance);
+          vPosition=basePosition; vTravelDistance=travelDistance/(lineHeight*particleSpeed);
+          vec4 mvPosition=modelViewMatrix*vec4(basePosition,1.0);
+          vNormal=position;
+          vec3 worldPos=(modelMatrix*vec4(basePosition,1.0)).xyz;
+          vViewDirection=normalize(cameraPosition-worldPos); vPosition=worldPos; vColor=color;
+          gl_PointSize=size*particleScale*pixelRatio*(100.0/length(mvPosition.xyz));
+          gl_Position=projectionMatrix*mvPosition;
+        }
+      `,
+      fragmentShader: /* glsl */`
+        ${circleGLSL}
+        uniform float intensity; uniform sampler2D worldMap;
+        uniform float powStrength; uniform vec2 remapRange; uniform float opacity;
+        varying vec3 vPosition; varying vec3 vNormal; varying vec3 vViewDirection;
+        varying float vTravelDistance; varying float vReveal; varying vec3 vColor;
+        #include <common>
+        ${mapLinearGLSL}
+        void main() {
+          float c=circle(gl_PointCoord.xy,vec2(0.5),0.25);
+          vec3 n=normalize(vNormal);
+          float u=atan(n.z,n.x)/(2.0*PI)+0.5;
+          float v=asin(n.y)/PI+0.5;
+          vec2 uv=vec2(1.0-u,v);
+          vec4 texel=texture2D(worldMap,uv);
+          float dist=1.0-length(gl_PointCoord.xy-vec2(0.5));
+          float alpha=clamp(pow(dist,powStrength),0.0,1.0);
+          float fresnelFactor=dot(vViewDirection,normalize(vPosition));
+          fresnelFactor=smoothstep(remapRange.x,remapRange.y,fresnelFactor);
+          if(fresnelFactor<1.0)discard;
+          float animVis=1.0;
+          if(vTravelDistance<0.1){animVis=mapLinear(vTravelDistance,0.0,0.1,0.0,1.0);}
+          else if(vTravelDistance>0.9){animVis=mapLinear(vTravelDistance,0.9,1.0,1.0,0.0);}
+          float outA=alpha*texel.a*animVis*vReveal;
+          gl_FragColor=vec4(vColor*intensity*texel.g,outA);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }
+      `,
+    }
+
+    class Particles extends THREE.Object3D {
+      constructor(renderer) {
+        super()
+        this.renderer = renderer
+        this.totalParticles = 75000
+        this.isAnimating = false
+        this.attributes = {}
+        this.material = new THREE.ShaderMaterial({
+          blending: THREE.AdditiveBlending, depthTest: false,
+          fragmentShader: particlesShader.fragmentShader, side: THREE.FrontSide,
+          transparent: true, uniforms: THREE.UniformsUtils.clone(particlesShader.uniforms),
+          vertexShader: particlesShader.vertexShader,
+        })
+        this.material.uniforms.pixelRatio.value = renderer.getPixelRatio()
+        this.generate()
+      }
+      generate() {
+        const N = this.totalParticles
+        this.attributes.position = new THREE.BufferAttribute(new Float32Array(N*3),3)
+        this.attributes.color = new THREE.BufferAttribute(new Float32Array(N*3),3)
+        this.attributes.size = new THREE.BufferAttribute(new Float32Array(N),1)
+        this.attributes.phase = new THREE.BufferAttribute(new Float32Array(N),1)
+        this.attributes.reveal = new THREE.BufferAttribute(new Float32Array(N),1)
+        this.attributes.revealOffset = new THREE.BufferAttribute(new Float32Array(N),1)
+        const geo = new THREE.BufferGeometry()
+        geo.setAttribute('size',this.attributes.size)
+        geo.setAttribute('position',this.attributes.position)
+        geo.setAttribute('phase',this.attributes.phase)
+        geo.setAttribute('reveal',this.attributes.reveal)
+        geo.setAttribute('color',this.attributes.color)
+        this.mesh = new THREE.Points(geo, this.material)
+        const colors = ['#7ea2f3','#8eb2ff']
+        const c = new THREE.Color(), p = new THREE.Vector3()
+        for(let i=0;i<N;i++){
+          const u=Math.random(),v=Math.random(),theta=2*Math.PI*u,phi=Math.acos(2*v-1)
+          const r=0.751
+          p.set(r*Math.sin(phi)*Math.cos(theta),r*Math.sin(phi)*Math.sin(theta),r*Math.cos(phi))
+          this.attributes.position.setXYZ(i,p.x,p.y,p.z)
+          this.attributes.phase.setX(i,Math.random()*3)
+          this.attributes.reveal.setX(i,0)
+          this.attributes.revealOffset.setX(i,0.005+Math.random()*0.095)
+          this.attributes.size.setX(i,1+Math.random())
+          c.setStyle(colors[Math.floor(Math.random()*2)])
+          this.attributes.color.setXYZ(i,c.r,c.g,c.b)
+        }
+        this.add(this.mesh)
+      }
+      setTexture(texture) { texture.colorSpace=THREE.SRGBColorSpace; this.material.uniforms.worldMap.value=texture }
+      play(delay=0) {
+        this._t0=gsap.delayedCall(delay,()=>{this.isAnimating=true})
+        this._t1=gsap.delayedCall(30,()=>{this.isAnimating=false})
+      }
+      stop() {
+        if(this._t0)gsap.killTweensOf(this._t0)
+        if(this._t1)gsap.killTweensOf(this._t1)
+        this.isAnimating=false
+        for(let i=0;i<this.attributes.reveal.count;i++) this.attributes.reveal.setX(i,0)
+        this.attributes.reveal.needsUpdate=true
+      }
+      update(camera) {
+        this.material.uniforms.cameraPosition.value.copy(camera.position)
+        this.material.uniforms.time.value=Time.elapsedTime
+        if(this.isAnimating){
+          for(let i=0;i<this.attributes.reveal.count;i++){
+            const cur=this.attributes.reveal.getX(i)
+            if(cur<1) this.attributes.reveal.setX(i,Math.min(cur+Time.delta*this.attributes.revealOffset.getX(i),1))
+          }
+          this.attributes.reveal.needsUpdate=true
+        }
+      }
+    }
+
+    // ============================================================
+    // Globe
+    // ============================================================
+    class Globe extends THREE.Group {
+      constructor(renderer) {
+        super()
+        this.lineGroup = new THREE.Group()
+        this.lineGroup.rotation.x = -Math.PI / 2
+        this.rotation.y = THREE.MathUtils.degToRad(-90)
+        this.add(this.lineGroup)
+
+        this.lineMaterial = new GlobeLineMaterial()
+        this.revealAnimation = new GlobeAnimatedLines(this.lineMaterial, 'revealAnimationProgress')
+        this.revealAnimation.settings.loop = false
+        this.glowAnimation = new GlobeAnimatedLines(this.lineMaterial, 'glowAnimationProgress')
+        this.glowAnimation.settings.delay = 5
+
+        const geometry = new THREE.IcosahedronGeometry(1, 12)
+        this.land = new Land(geometry)
+        this.add(this.land)
+        this.vignette = new Vignette(geometry)
+        this.add(this.vignette)
+        this.particles = new Particles(renderer)
+        this.add(this.particles)
+        this.orbitingLines = new OrbitingLines(this.lineGroup)
+
+        this.rotationEnabled = true
+      }
+
+      setupCoastline(geojson) {
+        const resolution = 2.5
+        geojson.features.forEach(feature => {
+          const { type, coordinates } = feature.geometry
+          const rings = type === 'LineString' ? [coordinates] : coordinates
+          rings.forEach(ring => {
+            const pts = []
+            for(let i=0;i<ring.length-1;i++){
+              const[lon0,lat0]=ring[i],[lon1,lat1]=ring[i+1]
+              const dist=Math.sqrt((lon1-lon0)**2+(lat1-lat0)**2)
+              const steps=Math.max(1,Math.ceil(dist/resolution))
+              for(let s=0;s<steps;s++){const t=s/steps;pts.push([lon0+(lon1-lon0)*t,lat0+(lat1-lat0)*t])}
+            }
+            const last=ring[ring.length-1]; pts.push([last[0],last[1]])
+            if(pts.length<2)return
+            const positions=[],count=pts.length
+            for(const[lon,lat]of pts){
+              const latR=lat*Math.PI/180,lonR=lon*Math.PI/180
+              positions.push(Math.cos(latR)*Math.cos(lonR),Math.cos(latR)*Math.sin(lonR),Math.sin(latR))
+            }
+            const percentages=new Float32Array(count)
+            let totalLen=0;const segLens=[]
+            for(let i=1;i<count;i++){
+              const dx=positions[i*3]-positions[(i-1)*3],dy=positions[i*3+1]-positions[(i-1)*3+1],dz=positions[i*3+2]-positions[(i-1)*3+2]
+              const len=Math.sqrt(dx*dx+dy*dy+dz*dz);segLens.push(len);totalLen+=len
+            }
+            percentages[0]=0;let cum=0
+            for(let i=1;i<count;i++){cum+=segLens[i-1];percentages[i]=totalLen>0?cum/totalLen:i/(count-1)}
+            const scale=0.75
+            for(let i=0;i<positions.length;i++)positions[i]*=scale
+            const geo=new THREE.BufferGeometry()
+            geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(positions),3))
+            geo.setAttribute('animationPercentage',new THREE.BufferAttribute(percentages,1))
+            this.lineGroup.add(new THREE.Line(geo,this.lineMaterial))
+          })
+        })
+      }
+
+      play() {
+        this.land.play(); this.vignette.play()
+        this.revealAnimation.play(); this.glowAnimation.play()
+        this.particles.play(3)
+        setTimeout(()=>this.orbitingLines.play(),3000)
+      }
+      stop() {
+        this.land.stop(); this.vignette.stop()
+        this.revealAnimation.stop(); this.glowAnimation.stop()
+        this.particles.stop(); this.orbitingLines.stop()
+      }
+      update(camera) {
+        this.vignette.update(camera); this.land.update(camera); this.particles.update(camera)
+        if(this.rotationEnabled) this.rotation.y += Time.delta * 0.1
+      }
+    }
+
+    // ============================================================
+    // Init
+    // ============================================================
+    const container = document.getElementById('canvas-container')
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false, powerPreference: 'high-performance', stencil: false })
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setSize(1500, 1500)
+    renderer.setClearColor(0x000000, 0)
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    renderer.toneMapping = THREE.LinearToneMapping
+    // CSS handles sizing via aspect-ratio: 1
+    container.appendChild(renderer.domElement)
+
+    const scene = new THREE.Scene()
+    const camera = new THREE.PerspectiveCamera(40, 1, 0.001, 1000)
+    camera.position.set(0, 0, 3.2)
+    camera.lookAt(0, 0, 0)
+
+    const globe = new Globe(renderer)
+    scene.add(globe)
+
+    // Load texture
+    const loader = new THREE.TextureLoader()
+    loader.load('./world-desktop.png', texture => {
+      globe.land.setTexture(texture, renderer.capabilities.getMaxAnisotropy())
+      globe.particles.setTexture(texture)
+      globe.play()
+    })
+
+    // Load coastline
+    fetch('./coastline.geojson')
+      .then(r => r.json())
+      .then(geojson => globe.setupCoastline(geojson))
+      .catch(e => console.warn('Coastline failed:', e))
+
+    // Render loop
+    function animate(now) {
+      requestAnimationFrame(animate)
+      Time.update()
+      globe.update(camera)
+      renderer.render(scene, camera)
+    }
+    requestAnimationFrame(animate)
+
+    // ============================================================
+    // Controls
+    // ============================================================
+    document.getElementById('toggle-rotation').addEventListener('change', e => {
+      globe.rotationEnabled = e.target.checked
+    })
+
+    document.getElementById('toggle-strokes').addEventListener('change', e => {
+      globe.lineGroup.visible = e.target.checked
+    })
+
+    document.getElementById('toggle-orbiting').addEventListener('change', e => {
+      if (e.target.checked) globe.orbitingLines.play()
+      else globe.orbitingLines.stop()
+    })
+
+    document.getElementById('toggle-particles').addEventListener('change', e => {
+      globe.particles.visible = e.target.checked
+    })
+
+    document.getElementById('toggle-vignette').addEventListener('change', e => {
+      globe.vignette.visible = e.target.checked
+    })
+  </script>
+</body>
+</html>

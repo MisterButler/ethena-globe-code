@@ -1,0 +1,36 @@
+import { generateBindingOptions } from '@/webgl/utils/editor/gui/gui-utils'
+
+export const gsapEasingFunctions = [
+  'power1.in',
+  'power1.out',
+  'power1.inOut',
+  'power2.in',
+  'power2.out',
+  'power2.inOut',
+  'power3.in',
+  'power3.out',
+  'power3.inOut',
+  'power4.in',
+  'power4.out',
+  'power4.inOut',
+  'linear',
+  'easeInOut',
+  'easeIn',
+  'easeOut',
+  'rough',
+  'slow',
+  'circ.in',
+  'circ.out',
+  'circ.inOut',
+  'bounce.in',
+  'bounce.out',
+  'bounce.inOut',
+  'elastic.in',
+  'elastic.out',
+  'elastic.inOut',
+  'back.in',
+  'back.out',
+  'back.inOut',
+]
+
+export const gsapEasingFunctionsGUIOptions = generateBindingOptions(gsapEasingFunctions)
