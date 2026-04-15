@@ -1,1 +1,0 @@
-self.__REACT_LOADABLE_MANIFEST="{\"app/page.tsx -> @/webgl/webgl-app/webgl-wrapper\":{\"id\":\"app/page.tsx -> @/webgl/webgl-app/webgl-wrapper\",\"files\":[\"static/chunks/_app-pages-browser_webgl_webgl-app_webgl-wrapper_tsx.js\"]}}"
