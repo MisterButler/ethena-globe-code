@@ -156,6 +156,13 @@ export default class Experience {
     }
   }
 
+  setCoastlinesBrightness(value: number) {
+    const scene = this.webglApp?.sceneManager?.scene
+    if (scene instanceof LandingScene) {
+      scene.setCoastlinesBrightness(value)
+    }
+  }
+
   async recordGlobe(options?: Partial<RecordingOptions>) {
     if (!this.webglApp) throw new Error('WebGL app not initialized')
     return recordGlobeRotation(this.webglApp, options)

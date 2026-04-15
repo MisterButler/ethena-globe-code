@@ -22,7 +22,8 @@ export function WebGLWrapper({ className = 'webgl-app', id = 'app', style }: Web
   const [globeStyle, setGlobeStyleState] = useState<'default' | 'classic'>('default')
   const [transactionLinesVisible, setTransactionLinesVisible] = useState(false)
   const [coastlinesVisible, setCoastlinesVisible] = useState(true)
-  const [globeGlow, setGlobeGlow] = useState(8.0)
+  const [coastlinesBrightness, setCoastlinesBrightness] = useState(0.3)
+  const [globeGlow, setGlobeGlow] = useState(6.0)
   const [outerGlow, setOuterGlow] = useState(0.18)
   const [rotationSpeed, setRotationSpeed] = useState(0.1)
   const [recording, setRecording] = useState(false)
@@ -67,8 +68,9 @@ export function WebGLWrapper({ className = 'webgl-app', id = 'app', style }: Web
         exp!.setGlobeStyle('default')
         exp!.setTransactionLinesVisible(false)
         exp!.setCoastlinesVisible(true)
+        exp!.setCoastlinesBrightness(0.3)
         exp!.setGlobeSize(6)
-        exp!.setGlobeGlow(8.0)
+        exp!.setGlobeGlow(6.0)
         exp!.setOuterGlow(0.18)
         exp!.setGlobeRotationSpeed(0.1)
       }
@@ -126,6 +128,12 @@ export function WebGLWrapper({ className = 'webgl-app', id = 'app', style }: Web
     experienceRef.current?.setCoastlinesVisible(next)
   }
 
+  const onCoastlinesBrightnessChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(e.target.value)
+    setCoastlinesBrightness(value)
+    experienceRef.current?.setCoastlinesBrightness(value)
+  }
+
   const toggleStyle = () => {
     const next = globeStyle === 'default' ? 'classic' : 'default'
     setGlobeStyleState(next)
@@ -139,6 +147,7 @@ export function WebGLWrapper({ className = 'webgl-app', id = 'app', style }: Web
     try {
       await experienceRef.current?.recordGlobe({
         onProgress: (p) => setProgress(p),
+        size: globeSize,
       })
     } catch (err) {
       console.error('Recording failed:', err)
@@ -222,6 +231,18 @@ export function WebGLWrapper({ className = 'webgl-app', id = 'app', style }: Web
             step={0.01}
             value={outerGlow}
             onChange={onOuterGlowChange}
+            style={{ width: 160 }}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span>Coastlines Brightness: {coastlinesBrightness.toFixed(2)}</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={coastlinesBrightness}
+            onChange={onCoastlinesBrightnessChange}
             style={{ width: 160 }}
           />
         </label>
