@@ -77,6 +77,24 @@ export const smoothCircle = /* glsl */ `
   }
 `
 
+// Triangular-PDF hash dither: adds ~1/255 sub-step noise to break up 8-bit
+// quantization banding on smooth dark gradients. Apply in display space
+// (after tonemapping + colorspace conversion) so the noise lands at the
+// quantization boundary. Noise amplitude averages zero so mean color is
+// preserved; variance is imperceptible but shatters visible bands.
+export const triangularDither = /* glsl */ `
+  float _dither_hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+  }
+  float triangularDither(vec2 fragCoord) {
+    float n1 = _dither_hash12(fragCoord);
+    float n2 = _dither_hash12(fragCoord + vec2(7.1, 11.3));
+    return (n1 - n2) / 255.0;
+  }
+`
+
 export const blendOverlay = /* glsl */ `
   vec3 blendOverlay(vec3 base, vec3 blend) {
     return mix(1.0 - 2.0 * (1.0 - base) * (1.0 - blend), 2.0 * base * blend, step(base, vec3(0.5)));

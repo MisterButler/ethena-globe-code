@@ -1,3 +1,4 @@
+import gsap from 'gsap'
 import { Color, Vector2, WebGLRenderer } from 'three'
 
 import { AppStateEvent, stateManager } from '../../app-state'
@@ -202,8 +203,21 @@ export default class LandingScene extends BaseScene {
     // Outer mesh opacity maxes at 1. Inner rim is only present in 'default' style
     // (classic = single-mesh look) with a baseline of 0.6.
     const innerBase = this.currentStyle === 'default' ? 0.6 : 0
-    if (vignette) vignette.opacity.value = this.outerGlow
-    if (inner) inner.opacity.value = innerBase * this.outerGlow
+    if (vignette) {
+      // Vignette.play() tweens opacity 0→1 over 3s; kill to avoid it
+      // overriding the user's slider target during that window.
+      gsap.killTweensOf(vignette.opacity)
+      vignette.opacity.value = this.outerGlow
+    }
+    if (inner) {
+      gsap.killTweensOf(inner.opacity)
+      inner.opacity.value = innerBase * this.outerGlow
+    }
+  }
+
+  setGlobeRotationSpeed(value: number) {
+    const globe = this.globeScene?.globe
+    if (globe) globe.rotationSpeed = value
   }
 
   setTransactionLinesVisible(visible: boolean) {
@@ -212,6 +226,10 @@ export default class LandingScene extends BaseScene {
     globe.orbitingLines.visible = visible
     if (visible) globe.orbitingLines.play()
     else globe.orbitingLines.stop()
+  }
+
+  setCoastlinesVisible(visible: boolean) {
+    this.globeScene?.globe?.setCoastlinesVisible(visible)
   }
 }
 

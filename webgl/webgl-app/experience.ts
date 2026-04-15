@@ -135,10 +135,24 @@ export default class Experience {
     }
   }
 
+  setGlobeRotationSpeed(value: number) {
+    const scene = this.webglApp?.sceneManager?.scene
+    if (scene instanceof LandingScene) {
+      scene.setGlobeRotationSpeed(value)
+    }
+  }
+
   setTransactionLinesVisible(visible: boolean) {
     const scene = this.webglApp?.sceneManager?.scene
     if (scene instanceof LandingScene) {
       scene.setTransactionLinesVisible(visible)
+    }
+  }
+
+  setCoastlinesVisible(visible: boolean) {
+    const scene = this.webglApp?.sceneManager?.scene
+    if (scene instanceof LandingScene) {
+      scene.setCoastlinesVisible(visible)
     }
   }
 

@@ -42,6 +42,14 @@ export default class Globe extends Group {
   private orbitingLinesTimeout: ReturnType<typeof setTimeout> | null = null
 
   animatedLines: Line[] = []
+  rotationSpeed = 0.1
+
+  setCoastlinesVisible(visible: boolean) {
+    this.animatedLines.forEach(line => {
+      line.visible = visible
+    })
+  }
+
   globeLineMaterial: GlobeLineMaterial
   revealAnimation: GlobeAnimatedLines
   glowAnimation: GlobeAnimatedLines
@@ -208,7 +216,11 @@ export default class Globe extends Group {
     this.particles.play(3)
     if (this.orbitingLines) {
       if (this.orbitingLinesTimeout) clearTimeout(this.orbitingLinesTimeout)
-      this.orbitingLinesTimeout = setTimeout(() => this.orbitingLines.play(), 3000)
+      this.orbitingLinesTimeout = setTimeout(() => {
+        // Respect external visibility toggle — if user disabled arcs during
+        // the 3s delay, don't resurrect them here.
+        if (this.orbitingLines.visible) this.orbitingLines.play()
+      }, 3000)
     }
   }
 
@@ -229,7 +241,7 @@ export default class Globe extends Group {
     this.vignette?.update(camera)
     this.land?.update(camera)
     this.particles?.update(camera)
-    this.rotation.y += Time.delta * 0.1
+    this.rotation.y += Time.delta * this.rotationSpeed
   }
 }
 

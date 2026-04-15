@@ -2,6 +2,7 @@ import GUIController from '@/webgl/utils/editor/gui/gui'
 import { GUIType } from '@/webgl/utils/editor/gui/gui-types'
 import { Color, ShaderMaterial, Vector2, Vector3 } from 'three'
 import { Colors } from '../../types/types-webgl'
+import { triangularDither } from '@/webgl/utils/shaders/math.glsl'
 
 const shader = {
   uniforms: {
@@ -50,6 +51,8 @@ const shader = {
     varying vec3 vViewDirection;
     varying vec2 vUv;
 
+    ${triangularDither}
+
 		void main() {
 			vec4 world = texture2D( worldMap, vUv );
 
@@ -73,6 +76,8 @@ const shader = {
       
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
+
+      gl_FragColor.rgb += vec3(triangularDither(gl_FragCoord.xy));
 		}`,
 }
 

@@ -11,6 +11,7 @@ import {
 } from 'three'
 
 import shader, { GUIVignetteShader } from './shader.glsl'
+import { triangularDither } from '@/webgl/utils/shaders/math.glsl'
 import gsap from 'gsap'
 
 function cloneUniforms(uniforms: any) {
@@ -33,6 +34,9 @@ const innerFragmentShader = /* glsl */ `
   uniform float opacity;
   varying vec3 vNormal;
   varying vec3 vViewDirection;
+
+  ${triangularDither}
+
   void main() {
     float f = 1.0 - abs(dot(vViewDirection, normalize(vNormal)));
     f = smoothstep(remapRange.x, remapRange.y, f);
@@ -40,6 +44,7 @@ const innerFragmentShader = /* glsl */ `
     gl_FragColor = vec4(color, clamp(f, 0.0, 1.0) * opacity);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
+    gl_FragColor.rgb += vec3(triangularDither(gl_FragCoord.xy));
   }
 `
 
