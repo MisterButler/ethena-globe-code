@@ -22,12 +22,14 @@ import { GlobeLineMaterial, GUIGlobeLineMaterial } from './globe-line-material'
 import Vignette from '../vignette/vignette'
 import { GUIVignetteShader } from '../vignette/shader.glsl'
 import Particles, { GUIParticles } from '../particles/particles'
+import OrbitingLines from '../orbiting-lines/orbiting-lines'
 import Time from '@/webgl/utils/common/time'
 import GlobeAnimatedLines, { GUIGlobeAnimatedLines } from './globe-animated-lines'
 
 const CREATE_ANIMATED_LINES = true
 const CREATE_VIGNETTE = true
 const CREATE_PARTICLES = true
+const CREATE_ORBITING_LINES = true
 
 export default class Globe extends Group {
   name = 'Globe'
@@ -36,8 +38,18 @@ export default class Globe extends Group {
   vignette!: Vignette
   land!: Land
   particles!: Particles
+  orbitingLines!: OrbitingLines
+  private orbitingLinesTimeout: ReturnType<typeof setTimeout> | null = null
 
   animatedLines: Line[] = []
+  rotationSpeed = 0.1
+
+  setCoastlinesVisible(visible: boolean) {
+    this.animatedLines.forEach(line => {
+      line.visible = visible
+    })
+  }
+
   globeLineMaterial: GlobeLineMaterial
   revealAnimation: GlobeAnimatedLines
   glowAnimation: GlobeAnimatedLines
@@ -69,6 +81,13 @@ export default class Globe extends Group {
     if (CREATE_PARTICLES) {
       this.particles = new Particles(this.renderer)
       this.add(this.particles)
+    }
+
+    if (CREATE_ORBITING_LINES) {
+      this.orbitingLines = new OrbitingLines(10)
+      // Attached to `this` (not `this.group`) so its unit-sphere arc coordinates
+      // aren't swept into the coastline bounding-box rescale in setup().
+      this.add(this.orbitingLines)
     }
 
     // Load coastline dataset for lines
@@ -195,6 +214,14 @@ export default class Globe extends Group {
     this.revealAnimation.play()
     this.glowAnimation.play()
     this.particles.play(3)
+    if (this.orbitingLines) {
+      if (this.orbitingLinesTimeout) clearTimeout(this.orbitingLinesTimeout)
+      this.orbitingLinesTimeout = setTimeout(() => {
+        // Respect external visibility toggle — if user disabled arcs during
+        // the 3s delay, don't resurrect them here.
+        if (this.orbitingLines.visible) this.orbitingLines.play()
+      }, 3000)
+    }
   }
 
   stop = () => {
@@ -203,13 +230,18 @@ export default class Globe extends Group {
     this.revealAnimation.stop()
     this.glowAnimation.stop()
     this.particles?.stop()
+    if (this.orbitingLinesTimeout) {
+      clearTimeout(this.orbitingLinesTimeout)
+      this.orbitingLinesTimeout = null
+    }
+    this.orbitingLines?.stop()
   }
 
   update(camera: PerspectiveCamera) {
     this.vignette?.update(camera)
     this.land?.update(camera)
     this.particles?.update(camera)
-    this.rotation.y += Time.delta * 0.1
+    this.rotation.y += Time.delta * this.rotationSpeed
   }
 }
 

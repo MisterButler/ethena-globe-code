@@ -17,9 +17,14 @@ export function WebGLWrapper({ className = 'webgl-app', id = 'app', style }: Web
   const webglCreated = useRef<boolean | null>(null)
   const experienceRef = useRef<Experience | null>(null)
   const [globeVisible, setGlobeVisible] = useState(true)
-  const [backgroundVisible, setBackgroundVisible] = useState(true)
-  const [globeSize, setGlobeSize] = useState(5)
-  const [globeStyle, setGlobeStyleState] = useState<'default' | 'blue'>('default')
+  const [backgroundVisible, setBackgroundVisible] = useState(false)
+  const [globeSize, setGlobeSize] = useState(6)
+  const [globeStyle, setGlobeStyleState] = useState<'default' | 'classic'>('default')
+  const [transactionLinesVisible, setTransactionLinesVisible] = useState(false)
+  const [coastlinesVisible, setCoastlinesVisible] = useState(true)
+  const [globeGlow, setGlobeGlow] = useState(8.0)
+  const [outerGlow, setOuterGlow] = useState(0.18)
+  const [rotationSpeed, setRotationSpeed] = useState(0.1)
   const [recording, setRecording] = useState(false)
   const [progress, setProgress] = useState(0)
 
@@ -47,6 +52,28 @@ export function WebGLWrapper({ className = 'webgl-app', id = 'app', style }: Web
           }
         })
 
+      // Push initial preset values into the experience once the landing
+      // scene is actually constructed (it's async; shader defaults have
+      // loaded but not our preset). Poll at 100ms up to 10s.
+      let attempts = 0
+      const applyPreset = () => {
+        const exp = experienceRef.current
+        const scene = exp?.webglApp?.sceneManager?.scene
+        if (!scene) {
+          if (attempts++ < 100) setTimeout(applyPreset, 100)
+          return
+        }
+        exp!.setBackgroundVisible(false)
+        exp!.setGlobeStyle('default')
+        exp!.setTransactionLinesVisible(false)
+        exp!.setCoastlinesVisible(true)
+        exp!.setGlobeSize(6)
+        exp!.setGlobeGlow(8.0)
+        exp!.setOuterGlow(0.18)
+        exp!.setGlobeRotationSpeed(0.1)
+      }
+      setTimeout(applyPreset, 100)
+
       return () => {}
     }
   }, [])
@@ -69,8 +96,38 @@ export function WebGLWrapper({ className = 'webgl-app', id = 'app', style }: Web
     experienceRef.current?.setGlobeSize(value)
   }
 
+  const onGlowChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(e.target.value)
+    setGlobeGlow(value)
+    experienceRef.current?.setGlobeGlow(value)
+  }
+
+  const onOuterGlowChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(e.target.value)
+    setOuterGlow(value)
+    experienceRef.current?.setOuterGlow(value)
+  }
+
+  const onRotationSpeedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(e.target.value)
+    setRotationSpeed(value)
+    experienceRef.current?.setGlobeRotationSpeed(value)
+  }
+
+  const toggleTransactionLines = () => {
+    const next = !transactionLinesVisible
+    setTransactionLinesVisible(next)
+    experienceRef.current?.setTransactionLinesVisible(next)
+  }
+
+  const toggleCoastlines = () => {
+    const next = !coastlinesVisible
+    setCoastlinesVisible(next)
+    experienceRef.current?.setCoastlinesVisible(next)
+  }
+
   const toggleStyle = () => {
-    const next = globeStyle === 'default' ? 'blue' : 'default'
+    const next = globeStyle === 'default' ? 'classic' : 'default'
     setGlobeStyleState(next)
     experienceRef.current?.setGlobeStyle(next)
   }
@@ -121,8 +178,16 @@ export function WebGLWrapper({ className = 'webgl-app', id = 'app', style }: Web
           Background
         </label>
         <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <input checked={globeStyle === 'blue'} onChange={toggleStyle} type="checkbox" />
-          Blue Style
+          <input checked={globeStyle === 'classic'} onChange={toggleStyle} type="checkbox" />
+          Classic Style
+        </label>
+        <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input checked={transactionLinesVisible} onChange={toggleTransactionLines} type="checkbox" />
+          Transaction Lines
+        </label>
+        <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input checked={coastlinesVisible} onChange={toggleCoastlines} type="checkbox" />
+          Coastlines
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span>Size: {globeSize.toFixed(2)}</span>
@@ -133,6 +198,42 @@ export function WebGLWrapper({ className = 'webgl-app', id = 'app', style }: Web
             step={0.1}
             value={globeSize}
             onChange={onSizeChange}
+            style={{ width: 160 }}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span>Land Glow: {globeGlow.toFixed(1)}</span>
+          <input
+            type="range"
+            min={0}
+            max={15}
+            step={0.1}
+            value={globeGlow}
+            onChange={onGlowChange}
+            style={{ width: 160 }}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span>Outer Glow: {outerGlow.toFixed(2)}</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={outerGlow}
+            onChange={onOuterGlowChange}
+            style={{ width: 160 }}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span>Rotation Speed: {rotationSpeed.toFixed(2)}</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={rotationSpeed}
+            onChange={onRotationSpeedChange}
             style={{ width: 160 }}
           />
         </label>

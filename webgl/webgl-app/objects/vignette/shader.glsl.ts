@@ -2,6 +2,7 @@ import { Color, ShaderMaterial, Vector2, Vector3 } from 'three'
 
 import GUIController from '@/webgl/utils/editor/gui/gui'
 import { GUIType } from '@/webgl/utils/editor/gui/gui-types'
+import { triangularDither } from '@/webgl/utils/shaders/math.glsl'
 
 const shader = {
   fragmentShader: /* glsl */ `
@@ -13,7 +14,9 @@ const shader = {
     varying vec3 vPosition;
     varying vec3 vViewDirection;
     varying vec2 vUv;
-    
+
+    ${triangularDither}
+
 		void main() {
 
       float fresnelFactor = abs(dot(vViewDirection, normalize(vNormal)));
@@ -24,10 +27,12 @@ const shader = {
 
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
+
+      gl_FragColor.rgb += vec3(triangularDither(gl_FragCoord.xy));
 		}`,
   uniforms: {
     cameraPosition: { value: new Vector3() },
-    color: { value: new Color(0x202939) },
+    color: { value: new Color(0x7d92b9) },
     opacity: { value: 0 },
     powStrength: { value: 100 },
     remapRange: { value: new Vector2(0, 1) },

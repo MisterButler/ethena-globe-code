@@ -2,17 +2,18 @@ import GUIController from '@/webgl/utils/editor/gui/gui'
 import { GUIType } from '@/webgl/utils/editor/gui/gui-types'
 import { Color, ShaderMaterial, Vector2, Vector3 } from 'three'
 import { Colors } from '../../types/types-webgl'
+import { triangularDither } from '@/webgl/utils/shaders/math.glsl'
 
 const shader = {
   uniforms: {
     worldMap: { value: null },
     backgroundColor: { value: new Color(Colors.Background) },
-    landColor: { value: new Color(0x0e0f12) },
-    seaColor: { value: new Color(0x0c0c0c) },
-    rimColor: { value: new Color(0x202939) },
-    lightColor: { value: new Color(0x596f9c) },
+    landColor: { value: new Color(0x1d2332) },
+    seaColor: { value: new Color(0x141a26) },
+    rimColor: { value: new Color(0x2a3650) },
+    lightColor: { value: new Color(0x6b84b5) },
     remapRange: { value: new Vector2(0, 0.5) },
-    powStrength: { value: 0.1 },
+    powStrength: { value: 0 },
     cameraPosition: { value: new Vector3() },
     opacity: { value: 0 },
     lightBrightness: { value: 10.0 },
@@ -50,6 +51,8 @@ const shader = {
     varying vec3 vViewDirection;
     varying vec2 vUv;
 
+    ${triangularDither}
+
 		void main() {
 			vec4 world = texture2D( worldMap, vUv );
 
@@ -73,6 +76,8 @@ const shader = {
       
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
+
+      gl_FragColor.rgb += vec3(triangularDither(gl_FragCoord.xy));
 		}`,
 }
 
