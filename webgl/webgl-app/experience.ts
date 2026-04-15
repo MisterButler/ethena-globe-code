@@ -114,10 +114,31 @@ export default class Experience {
     }
   }
 
-  setGlobeStyle(style: 'default' | 'blue') {
+  setGlobeStyle(style: 'default' | 'classic') {
     const scene = this.webglApp?.sceneManager?.scene
     if (scene instanceof LandingScene) {
       scene.setGlobeStyle(style)
+    }
+  }
+
+  setGlobeGlow(value: number) {
+    const scene = this.webglApp?.sceneManager?.scene
+    if (scene instanceof LandingScene) {
+      scene.setGlobeGlow(value)
+    }
+  }
+
+  setOuterGlow(value: number) {
+    const scene = this.webglApp?.sceneManager?.scene
+    if (scene instanceof LandingScene) {
+      scene.setOuterGlow(value)
+    }
+  }
+
+  setTransactionLinesVisible(visible: boolean) {
+    const scene = this.webglApp?.sceneManager?.scene
+    if (scene instanceof LandingScene) {
+      scene.setTransactionLinesVisible(visible)
     }
   }
 

@@ -27,7 +27,7 @@ const shader = {
 		}`,
   uniforms: {
     cameraPosition: { value: new Vector3() },
-    color: { value: new Color(0x202939) },
+    color: { value: new Color(0x7d92b9) },
     opacity: { value: 0 },
     powStrength: { value: 100 },
     remapRange: { value: new Vector2(0, 1) },

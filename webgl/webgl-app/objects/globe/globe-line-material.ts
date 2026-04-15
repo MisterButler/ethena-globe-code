@@ -32,14 +32,14 @@ export class GlobeLineMaterial extends ShaderMaterial {
       uniforms: {
         glowAnimationProgress: { value: 0.0 },
         // Length of the gradient effect
-        gradientBrightness: { value: 2.0 },
+        gradientBrightness: { value: 4.0 },
 
-        gradientLength: { value: 0.1 },
+        gradientLength: { value: 0.25 },
 
         // Brightness multiplier for the gradient
         gradientStartEnd: { value: [0.0, 0.1] },
 
-        lineColor: { value: new Color(0xbdd1f6) },
+        lineColor: { value: new Color(0x8aa4d4) },
         revealAnimationProgress: { value: 0.0 }, // Start and end fade zones
       },
       vertexShader: /* glsl */ `

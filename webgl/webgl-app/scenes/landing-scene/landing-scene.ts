@@ -155,32 +155,63 @@ export default class LandingScene extends BaseScene {
     }
   }
 
-  setGlobeStyle(style: 'default' | 'blue') {
+  private currentStyle: 'default' | 'classic' = 'default'
+  private outerGlow = 1
+
+  setGlobeStyle(style: 'default' | 'classic') {
     const globe = this.globeScene?.globe
     if (!globe) return
+
+    this.currentStyle = style
 
     const land = globe.land?.mesh.material.uniforms
     const vignette = globe.vignette?.material.uniforms
 
-    if (style === 'blue') {
-      land?.landColor.value.set(new Color(0x2a3a4d))
-      land?.seaColor.value.set(new Color(0x141d2a))
-      land?.rimColor.value.set(new Color(0x3b5a8a))
-      land?.lightColor.value.set(new Color(0x8aa3c8))
-      if (vignette) {
-        vignette.color.value.set(new Color(0x4a6fa5))
-        vignette.powStrength.value = 40
-      }
-    } else {
+    if (style === 'classic') {
       land?.landColor.value.set(new Color(0x0e0f12))
       land?.seaColor.value.set(new Color(0x0c0c0c))
       land?.rimColor.value.set(new Color(0x202939))
       land?.lightColor.value.set(new Color(0x596f9c))
-      if (vignette) {
-        vignette.color.value.set(new Color(0x202939))
-        vignette.powStrength.value = 100
-      }
+      if (vignette) vignette.color.value.set(new Color(0x202939))
+    } else {
+      land?.landColor.value.set(new Color(0x1d2332))
+      land?.seaColor.value.set(new Color(0x141a26))
+      land?.rimColor.value.set(new Color(0x2a3650))
+      land?.lightColor.value.set(new Color(0x6b84b5))
+      if (vignette) vignette.color.value.set(new Color(0x7d92b9))
     }
+
+    this.applyOuterGlow()
+  }
+
+  setGlobeGlow(value: number) {
+    const globe = this.globeScene?.globe
+    const land = globe?.land?.mesh.material.uniforms
+    if (land) land.lightBrightness.value = value
+  }
+
+  setOuterGlow(value: number) {
+    this.outerGlow = value
+    this.applyOuterGlow()
+  }
+
+  private applyOuterGlow() {
+    const globe = this.globeScene?.globe
+    const vignette = globe?.vignette?.material.uniforms
+    const inner = globe?.vignette?.inner.uniforms
+    // Outer mesh opacity maxes at 1. Inner rim is only present in 'default' style
+    // (classic = single-mesh look) with a baseline of 0.6.
+    const innerBase = this.currentStyle === 'default' ? 0.6 : 0
+    if (vignette) vignette.opacity.value = this.outerGlow
+    if (inner) inner.opacity.value = innerBase * this.outerGlow
+  }
+
+  setTransactionLinesVisible(visible: boolean) {
+    const globe = this.globeScene?.globe
+    if (!globe?.orbitingLines) return
+    globe.orbitingLines.visible = visible
+    if (visible) globe.orbitingLines.play()
+    else globe.orbitingLines.stop()
   }
 }
 
