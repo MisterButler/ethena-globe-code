@@ -17,15 +17,17 @@ export class GlobeLineMaterial extends ShaderMaterial {
         uniform float gradientBrightness;
         uniform vec2 gradientStartEnd;
         uniform float opacity;
+        uniform float brightness;
         varying float vAnimationPercentage;
-        
+
         ${mapLinear}
         ${computeGradientMask}
-  
+
         void main() {
           float gradientPulseMask = computeGradientMask(glowAnimationProgress, gradientLength, gradientStartEnd, vAnimationPercentage);
           float reveal = computeGradientMask(mix(0.0, 0.5, revealAnimationProgress), 1.0, vec2(0.0, 0.5), vAnimationPercentage);
-          gl_FragColor = vec4(mix(lineColor, lineColor * gradientBrightness, gradientPulseMask), reveal);
+          vec3 rgb = mix(lineColor, lineColor * gradientBrightness, gradientPulseMask) * brightness;
+          gl_FragColor = vec4(rgb, reveal);
         }
       `,
       transparent: true,
@@ -41,6 +43,7 @@ export class GlobeLineMaterial extends ShaderMaterial {
 
         lineColor: { value: new Color(0x8aa4d4) },
         revealAnimationProgress: { value: 0.0 }, // Start and end fade zones
+        brightness: { value: 1.0 },
       },
       vertexShader: /* glsl */ `
         attribute float animationPercentage;

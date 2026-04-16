@@ -231,6 +231,11 @@ export default class LandingScene extends BaseScene {
   setCoastlinesVisible(visible: boolean) {
     this.globeScene?.globe?.setCoastlinesVisible(visible)
   }
+
+  setCoastlinesBrightness(value: number) {
+    const mat = this.globeScene?.globe?.globeLineMaterial
+    if (mat) mat.uniforms.brightness.value = value
+  }
 }
 
 /* #if DEBUG */

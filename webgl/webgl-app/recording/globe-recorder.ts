@@ -17,6 +17,9 @@ export type RecordingOptions = {
   fps: number
   durationSeconds: number
   bitrate: number
+  // Matches the dashboard Size slider (1–12). 6 = baseline framing used
+  // when the recorder was written; higher = closer camera = bigger globe.
+  size: number
   onProgress?: (progress: number) => void
 }
 
@@ -26,6 +29,7 @@ const DEFAULT_OPTIONS: RecordingOptions = {
   fps: 60,
   durationSeconds: 30,
   bitrate: 40_000_000,
+  size: 6,
 }
 
 export async function recordGlobeRotation(webglApp: WebGLApp, options: Partial<RecordingOptions> = {}) {
@@ -63,7 +67,10 @@ export async function recordGlobeRotation(webglApp: WebGLApp, options: Partial<R
   const aspect = opts.width / opts.height
   const fillRatio = 0.9
   const globeRadius = 1
-  const distance = globeRadius / Math.tan(((fov * fillRatio) / 2) * (Math.PI / 180))
+  const baseDistance = globeRadius / Math.tan(((fov * fillRatio) / 2) * (Math.PI / 180))
+  // 6 is the slider's baseline; scale camera distance inversely with size
+  // so a larger slider brings the camera closer (globe appears bigger).
+  const distance = baseDistance * (6 / Math.max(opts.size, 0.01))
 
   const camera = new PerspectiveCamera(fov, aspect, 0.01, 100)
   camera.position.set(0, 0, distance)
